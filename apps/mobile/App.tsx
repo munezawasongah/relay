@@ -1,29 +1,18 @@
+import { NavigationContainer } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
-import { StyleSheet, Text, View } from "react-native";
-
-// Mobile app shell. Navigation stack (auth -> chat list -> chat) lands with the
-// "Phase 0: React Native shell + navigation" build step.
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { AuthProvider } from "./src/auth/AuthContext";
+import RootNavigator from "./src/navigation/RootNavigator";
 
 export default function App() {
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Relay</Text>
-      <Text>Mobile shell scaffold — navigation lands next.</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <NavigationContainer>
+          <RootNavigator />
+        </NavigationContainer>
+        <StatusBar style="auto" />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "700",
-  },
-});
