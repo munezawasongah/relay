@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: relay-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: relay
+      POSTGRES_PASSWORD: relay
+      POSTGRES_DB: relay
+    ports:
+      - "5432:5432"
+    volumes:
+      - relay_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: relay-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - relay_redis_data:/data
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: relay-coturn
+    restart: unless-stopped
+    network_mode: "host"
+    command: >
+      -n --log-file=stdout
+      --min-port=49160 --max-port=49200
+      --realm=relay.local
+      --user=relay:relay
+
+volumes:
+  relay_postgres_data:
+  relay_redis_data:

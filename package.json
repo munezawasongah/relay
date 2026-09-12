@@ -1,0 +1,25 @@
+{
+  "name": "relay",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Relay - cross-platform messaging app (text, media, voice/video calling)",
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:auth": "npm run dev -w services/auth-service",
+    "dev:messaging": "npm run dev -w services/messaging-service",
+    "dev:media": "npm run dev -w services/media-service",
+    "dev:call-signaling": "npm run dev -w services/call-signaling-service",
+    "dev:push": "npm run dev -w services/push-service",
+    "dev:web": "npm run dev -w apps/web",
+    "dev:mobile": "npm run start -w apps/mobile",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
