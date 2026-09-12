@@ -1,12 +1,16 @@
-import "dotenv/config";
+import path from "path";
+import dotenv from "dotenv";
+// Services live at services/<name>/src (or dist after build) — the shared
+// .env file lives at the repo root, 3 directories up either way.
+dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
+
 import express from "express";
+import { devicesRouter } from "./routes/devices";
+import { otpRouter } from "./routes/otp";
+import { usersRouter } from "./routes/users";
 
 // Auth Service — responsibility (architecture doc, section 3.1):
 // OTP issuance/verification, JWT session tokens, device registration.
-//
-// Route implementations land in the "Phase 0: Auth service + Postgres schema"
-// build step. This file boots the service shell so it can be deployed on
-// Railway from day one and wired into the API gateway routing.
 
 const app = express();
 app.use(express.json());
@@ -17,10 +21,9 @@ app.get("/health", (_req, res) => {
   res.json({ service: "auth-service", status: "ok" });
 });
 
-// TODO(Phase 0): POST /otp/request        - issue SMS OTP for a phone number
-// TODO(Phase 0): POST /otp/verify         - verify OTP, return JWT session token
-// TODO(Phase 0): POST /devices/register   - register a device + push token
-// TODO(Phase 0): GET  /users/me           - fetch the authenticated user's profile
+app.use(otpRouter);
+app.use(devicesRouter);
+app.use(usersRouter);
 
 app.listen(PORT, () => {
   console.log(`[auth-service] listening on :${PORT}`);
