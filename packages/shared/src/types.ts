@@ -72,14 +72,28 @@ export interface Call {
 
 // --- WebSocket event contracts (Messaging Service) ---
 
+export interface MessageSendPayload {
+  conversationId: string;
+  ciphertext: string;
+  mediaRef?: string;
+  clientMessageId: string;
+}
+
+export interface MessageSendAck {
+  ok: boolean;
+  error?: "not_a_member" | "invalid_payload" | "internal_error";
+  message?: Message;
+  clientMessageId?: string;
+}
+
+export interface MessageReadAck {
+  ok: boolean;
+  error?: "not_found" | "internal_error";
+}
+
 export interface ClientToServerEvents {
-  "message:send": (payload: {
-    conversationId: string;
-    ciphertext: string;
-    mediaRef?: string;
-    clientMessageId: string;
-  }) => void;
-  "message:read": (payload: { messageId: string }) => void;
+  "message:send": (payload: MessageSendPayload, ack: (result: MessageSendAck) => void) => void;
+  "message:read": (payload: { messageId: string }, ack: (result: MessageReadAck) => void) => void;
   "typing:start": (payload: { conversationId: string }) => void;
   "typing:stop": (payload: { conversationId: string }) => void;
 }
