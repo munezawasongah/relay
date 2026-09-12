@@ -18,7 +18,8 @@
     "dev:mobile": "npm run start -w apps/mobile",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
-    "db:migrate": "node db/migrate.js"
+    "db:migrate": "node db/migrate.js",
+    "test:crypto": "npm run test -w packages/crypto"
   },
   "engines": {
     "node": ">=20"

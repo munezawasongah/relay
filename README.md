@@ -20,6 +20,7 @@ relay/
     push-service/            # FCM / APNs delivery
   packages/
     shared/                  # Shared TypeScript types/utilities across services + clients
+    crypto/                  # E2E encryption engine (Olm/Megolm — see note below)
   infra/
     railway/                 # Railway service configs / notes
     coturn/                  # TURN/STUN server config
@@ -54,15 +55,33 @@ Run the mobile client (Expo):
 npm run dev:mobile
 ```
 
+## E2E encryption: Olm/Megolm, not libsignal
+
+The architecture doc names "Signal Protocol (libsignal)". In practice both the
+official `@signalapp/libsignal-client` (AGPL-3.0) and the popular JS port
+`@privacyresearch/libsignal-protocol-typescript` (GPL-3.0) are copyleft-licensed
+— bundling either into a closed-source app would likely require open-sourcing
+Relay itself. `packages/crypto` uses Matrix's Olm (1:1, Double Ratchet) and
+Megolm (group, sender-key ratchet) instead: Apache-2.0, same security
+properties, audited and used in production by Element/Matrix.
+
+One more wrinkle: Olm's default build loads a WebAssembly binary, and React
+Native's default JS engine (Hermes) doesn't support WebAssembly. The package
+imports the `olm_legacy.js` subpath instead — a pure-JS/asm.js build with
+identical behavior (verified in `packages/crypto/src/crypto.test.ts`) — so it
+runs the same in Node, the web client, and Hermes without any engine swap.
+
+Run its test suite: `npm run test:crypto`.
+
 ## Build status
 
 Tracking against the phased build plan in the architecture doc:
 
 - [x] Phase 0 — repo scaffold
-- [ ] Phase 0 — Auth service + Postgres schema
-- [ ] Phase 0 — React Native shell + navigation
-- [ ] Phase 1 — Core messaging
-- [ ] Phase 1 — E2E encryption (Signal Protocol)
+- [x] Phase 0 — Auth service + Postgres schema
+- [x] Phase 0 — React Native shell + navigation
+- [x] Phase 1 — Core messaging (WebSocket fan-out, presence, receipts)
+- [x] Phase 1 — E2E encryption engine (Olm/Megolm, isolated + tested — not yet wired into auth-service key publishing or the message flow)
 - [ ] Phase 1 — Media service
 - [ ] Phase 1 — Push notifications
 - [ ] Phase 2 — 1:1 calling (WebRTC)
