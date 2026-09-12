@@ -73,6 +73,38 @@ runs the same in Node, the web client, and Hermes without any engine swap.
 
 Run its test suite: `npm run test:crypto`.
 
+### Key publishing (auth-service)
+
+X3DH-style prekey bundles now have somewhere to live: `db/migrations/0002_prekeys.sql`
+adds a `one_time_prekeys` table (the long-term identity key reuses the existing
+`users.public_key` column — one identity key per user, not per device, matching
+`packages/crypto`'s deliberate MVP simplification of deferring multi-device
+fan-out). `services/auth-service/src/routes/keys.ts` exposes:
+
+- `POST /keys/identity` — publish/replace this user's identity key
+- `POST /keys/one-time` — top up the one-time-key pool (idempotent — republishing an
+  already-stored key id is a no-op)
+- `GET /keys/one-time/count` — so a client knows when to top up
+- `GET /keys/bundle/:userId` — the piece a client needs before starting a new 1:1
+  session with `userId`: their identity key plus one atomically-claimed one-time key
+  (`FOR UPDATE SKIP LOCKED`, so it's handed out exactly once even under concurrent
+  requests). Responds `404 identity_key_not_published` if that user hasn't published
+  an identity key yet, or `409 no_one_time_keys_available` if their pool is
+  temporarily empty — both real, expected states a caller needs to handle, not bugs.
+
+`apps/mobile/src/crypto/` wires the client side of this in: `bootstrap.ts` generates
+a per-device pickle key (native CSPRNG, stored in `expo-secure-store`, never sent to
+the server), initializes `RelayCrypto`, and calls `ensureKeysPublished()` on sign-in
+and on session restore — idempotent and best-effort, so a flaky network doesn't block
+login. `store.ts` is the `CryptoStore` implementation backed by `expo-secure-store`
+(see its file comment for a real known limitation: iOS caps individual values at
+2048 bytes, and the account pickle grows with the one-time-key pool).
+
+Still open: the live message send/receive path (mobile has no chat UI or
+messaging-service WebSocket client yet — `ChatScreen` is still a placeholder) doesn't
+call `encryptToUser`/`decryptFromUser` yet. That's the next piece of "wire it into
+the message flow."
+
 ## Build status
 
 Tracking against the phased build plan in the architecture doc:
@@ -81,7 +113,7 @@ Tracking against the phased build plan in the architecture doc:
 - [x] Phase 0 — Auth service + Postgres schema
 - [x] Phase 0 — React Native shell + navigation
 - [x] Phase 1 — Core messaging (WebSocket fan-out, presence, receipts)
-- [x] Phase 1 — E2E encryption engine (Olm/Megolm, isolated + tested — not yet wired into auth-service key publishing or the message flow)
+- [x] Phase 1 — E2E encryption engine (Olm/Megolm, isolated + tested) — wired into auth-service key publishing; not yet wired into the live message flow (no chat UI/WebSocket client in the mobile app yet)
 - [ ] Phase 1 — Media service
 - [ ] Phase 1 — Push notifications
 - [ ] Phase 2 — 1:1 calling (WebRTC)

@@ -6,6 +6,7 @@ dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 import express from "express";
 import { devicesRouter } from "./routes/devices";
+import { keysRouter } from "./routes/keys";
 import { otpRouter } from "./routes/otp";
 import { usersRouter } from "./routes/users";
 
@@ -24,6 +25,7 @@ app.get("/health", (_req, res) => {
 app.use(otpRouter);
 app.use(devicesRouter);
 app.use(usersRouter);
+app.use(keysRouter);
 
 app.listen(PORT, () => {
   console.log(`[auth-service] listening on :${PORT}`);

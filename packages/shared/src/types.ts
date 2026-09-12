@@ -105,3 +105,32 @@ export interface ServerToClientEvents {
   "typing:update": (payload: { conversationId: string; userId: string; isTyping: boolean }) => void;
   "presence:update": (payload: { userId: string; online: boolean }) => void;
 }
+
+// --- Prekey publishing (Auth Service) ---
+// Mirrors packages/crypto's IdentityKeys/OneTimeKeyBundle shapes (curve25519
+// only — see packages/crypto/src/identity.ts for why ed25519 isn't needed
+// here: session bootstrap only uses the curve25519 side).
+
+export interface PublishIdentityKeyPayload {
+  identityKey: string;
+}
+
+export interface PublishOneTimeKeysPayload {
+  oneTimeKeys: Record<string, string>; // keyId -> base64 curve25519 public key
+}
+
+export interface PublishOneTimeKeysResponse {
+  ok: true;
+  inserted: number;
+}
+
+export interface OneTimeKeyCountResponse {
+  count: number;
+}
+
+export interface KeyBundleResponse {
+  identityKey: string;
+  oneTimeKey: string;
+}
+
+export type KeyBundleError = "identity_key_not_published" | "no_one_time_keys_available";
