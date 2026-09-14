@@ -13,6 +13,7 @@ import type {
 } from "@relay/shared";
 import { verifySocketToken } from "./auth";
 import { getConversationIdsForUser, insertMessage, isConversationMember, markMessageRead } from "./db";
+import { conversationsRouter } from "./routes/conversations";
 import { decrementPresence, incrementPresence } from "./redis";
 
 // Messaging Service — responsibility (architecture doc, section 3.1):
@@ -34,9 +35,13 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEve
 
 const PORT = process.env.MESSAGING_SERVICE_PORT || 4002;
 
+app.use(express.json());
+
 app.get("/health", (_req, res) => {
   res.json({ service: "messaging-service", status: "ok" });
 });
+
+app.use(conversationsRouter);
 
 function conversationRoom(conversationId: string): string {
   return `conversation:${conversationId}`;

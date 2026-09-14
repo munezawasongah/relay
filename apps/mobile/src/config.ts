@@ -6,3 +6,9 @@ import Constants from "expo-constants";
 // "localhost" on the phone means the phone itself.
 export const API_BASE_URL: string =
   (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) || "http://localhost:4001";
+
+// Same physical-device caveat as API_BASE_URL above — set
+// expo.extra.messagingBaseUrl in app.json to your machine's LAN IP for
+// Expo Go on a real device.
+export const MESSAGING_BASE_URL: string =
+  (Constants.expoConfig?.extra?.messagingBaseUrl as string | undefined) || "http://localhost:4002";

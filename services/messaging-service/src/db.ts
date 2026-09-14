@@ -67,6 +67,134 @@ export async function insertMessage(params: {
   return toMessage(rows[0]);
 }
 
+export interface ConversationRow {
+  id: string;
+  type: "direct" | "group";
+  name: string | null;
+  peer_id: string | null;
+  peer_display_name: string | null;
+  peer_avatar_url: string | null;
+  last_message_id: string | null;
+  last_message_sender_id: string | null;
+  last_message_sent_at: string | null;
+}
+
+/** One row per conversation the user belongs to, with (for direct
+ *  conversations only — see PublicUser/ConversationSummary in
+ *  @relay/shared) the other member's public info and last-message
+ *  metadata. Metadata only: ciphertext content isn't fetched here, so this
+ *  can't be used to preview message content, by design — see ChatListScreen
+ *  for why decrypting speculatively here would be unsafe (each Olm ratchet
+ *  message can only be decrypted once). */
+export async function listConversationsForUser(userId: string): Promise<ConversationRow[]> {
+  const { rows } = await pool().query<ConversationRow>(
+    `SELECT
+       c.id,
+       c.type,
+       c.name,
+       peer.id AS peer_id,
+       peer.display_name AS peer_display_name,
+       peer.avatar_url AS peer_avatar_url,
+       lm.id AS last_message_id,
+       lm.sender_id AS last_message_sender_id,
+       lm.sent_at AS last_message_sent_at
+     FROM conversations c
+     JOIN conversation_members me ON me.conversation_id = c.id AND me.user_id = $1
+     LEFT JOIN conversation_members other_member
+       ON c.type = 'direct' AND other_member.conversation_id = c.id AND other_member.user_id != $1
+     LEFT JOIN users peer ON peer.id = other_member.user_id
+     LEFT JOIN LATERAL (
+       SELECT id, sender_id, sent_at FROM messages
+       WHERE conversation_id = c.id
+       ORDER BY sent_at DESC
+       LIMIT 1
+     ) lm ON true
+     ORDER BY COALESCE(lm.sent_at, c.created_at) DESC`,
+    [userId]
+  );
+  return rows;
+}
+
+/** Most recent `limit` messages, optionally paging backward from
+ *  `beforeMessageId` (for "load older messages" as the user scrolls up).
+ *  Returns oldest-first so the caller can append straight into a
+ *  chronological list. */
+export async function getMessagesForConversation(
+  conversationId: string,
+  limit: number,
+  beforeMessageId?: string
+): Promise<Message[]> {
+  let rows: MessageRow[];
+  if (beforeMessageId) {
+    ({ rows } = await pool().query<MessageRow>(
+      `SELECT m.* FROM messages m
+       WHERE m.conversation_id = $1
+         AND m.sent_at < (SELECT sent_at FROM messages WHERE id = $3)
+       ORDER BY m.sent_at DESC
+       LIMIT $2`,
+      [conversationId, limit, beforeMessageId]
+    ));
+  } else {
+    ({ rows } = await pool().query<MessageRow>(
+      `SELECT * FROM messages WHERE conversation_id = $1 ORDER BY sent_at DESC LIMIT $2`,
+      [conversationId, limit]
+    ));
+  }
+  return rows.map(toMessage).reverse();
+}
+
+/** Finds the existing direct conversation between these two users, or
+ *  creates one. Direct conversations are unordered pairs, so this always
+ *  looks for an existing one before creating — otherwise two users tapping
+ *  "message" on each other around the same time could end up with two
+ *  separate direct conversations. Guarded by a transaction-scoped Postgres
+ *  advisory lock keyed to the (sorted, so order-independent) pair, so two
+ *  concurrent calls for the same pair serialize instead of racing —
+ *  there's no schema-level unique constraint for "at most one direct
+ *  conversation per pair" (would need a migration), so this is the
+ *  concurrency guarantee until one exists. */
+export async function findOrCreateDirectConversation(
+  userId: string,
+  peerId: string
+): Promise<string> {
+  const lockKey = [userId, peerId].sort().join(":");
+
+  const client = await pool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [lockKey]);
+
+    const { rows: existing } = await client.query<{ id: string }>(
+      `SELECT c.id FROM conversations c
+       JOIN conversation_members m1 ON m1.conversation_id = c.id AND m1.user_id = $1
+       JOIN conversation_members m2 ON m2.conversation_id = c.id AND m2.user_id = $2
+       WHERE c.type = 'direct'
+       LIMIT 1`,
+      [userId, peerId]
+    );
+    if (existing.length > 0) {
+      await client.query("COMMIT");
+      return existing[0].id;
+    }
+
+    const { rows } = await client.query<{ id: string }>(
+      `INSERT INTO conversations (type) VALUES ('direct') RETURNING id`
+    );
+    const conversationId = rows[0].id;
+    await client.query(
+      `INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2), ($1, $3)`,
+      [conversationId, userId, peerId]
+    );
+    await client.query("COMMIT");
+    return conversationId;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function markMessageRead(
   messageId: string,
   readerId: string

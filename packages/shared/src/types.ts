@@ -134,3 +134,34 @@ export interface KeyBundleResponse {
 }
 
 export type KeyBundleError = "identity_key_not_published" | "no_one_time_keys_available";
+
+// --- Conversations (REST — Messaging Service) ---
+// The WebSocket contract above (ClientToServerEvents/ServerToClientEvents)
+// covers the live path. These cover what a client needs before it can use
+// that live path: which conversations it's in, and message history for one
+// of them (both server-blind — ciphertext travels opaquely, same as live).
+
+export interface PublicUser {
+  id: string;
+  displayName: string;
+  avatarUrl?: string;
+}
+
+export interface ConversationSummary {
+  id: string;
+  type: ConversationType;
+  name?: string;
+  /** The other member, for a direct conversation. Absent for groups (Phase
+   *  1 scope: this endpoint doesn't resolve full group rosters). */
+  peer?: PublicUser;
+  lastMessage?: {
+    id: string;
+    senderId: string;
+    sentAt: string;
+  };
+}
+
+export interface CreateDirectConversationPayload {
+  peerId: string;
+}
+

@@ -100,10 +100,46 @@ login. `store.ts` is the `CryptoStore` implementation backed by `expo-secure-sto
 (see its file comment for a real known limitation: iOS caps individual values at
 2048 bytes, and the account pickle grows with the one-time-key pool).
 
-Still open: the live message send/receive path (mobile has no chat UI or
-messaging-service WebSocket client yet — `ChatScreen` is still a placeholder) doesn't
-call `encryptToUser`/`decryptFromUser` yet. That's the next piece of "wire it into
-the message flow."
+### Live message flow (ChatScreen)
+
+The other half is wired in now. `services/messaging-service` grew a small REST
+surface alongside its socket.io server (same `app`, same port) — the WebSocket side
+was already server-blind (content only ever travels as opaque `ciphertext`); this is
+what a client needs before it can use that live path at all:
+
+- `GET /conversations` — the caller's conversations, with (for direct conversations)
+  the other member's public info and last-message *metadata* (id/sender/timestamp,
+  never content — see ChatListScreen's file comment for why not)
+- `GET /conversations/:conversationId/messages` — history, membership-checked
+- `POST /conversations/direct` — find-or-create a direct conversation with another
+  user by id (guarded by a Postgres advisory lock keyed to the pair, so two people
+  starting a chat with each other at the same instant can't end up with two separate
+  conversations)
+
+`auth-service` grew one matching endpoint, `GET /users/by-phone/:phoneNumber` — a
+stand-in for real contacts sync (still not built) just so a chat can be started at
+all; `apps/mobile/src/screens/main/NewChatScreen.tsx` is the (minimal) UI for it.
+
+`apps/mobile/src/messaging/` is the client wiring: `MessagingContext` owns one
+socket.io connection per signed-in session; `useDirectConversation` is what
+`ChatScreen` now actually runs on — it loads history, decrypts, sends, and receives,
+live, for one 1:1 conversation. The one subtlety worth knowing before touching it:
+**a device can't decrypt its own sent messages** (Double Ratchet sessions have
+separate send/receive chains — this isn't a bug to fix, it's how the protocol
+works), and **an ordinary ratchet message can only be decrypted once, ever**
+(decrypting advances the ratchet). `messaging/messageCache.ts` is the fix for both:
+every message's plaintext is cached (via `AsyncStorage`) the moment it's known —
+at send time for your own messages, immediately after the one legitimate decrypt for
+the peer's — and both history load and live receive check that cache before ever
+touching `decryptFromUser` again. Verified against the real running services (two
+real users, real Olm sessions, real socket.io connections, key-bundle-fetch-on-first-
+contact and all) before committing — not just typechecked.
+
+Deliberately out of scope here: group conversations (Megolm session creation +
+key distribution is real additional work — `useDirectConversation` only handles
+`type: 'direct'`), and showing a decrypted last-message preview in `ChatListScreen`
+(would mean decrypting speculatively outside of an open chat, which the "only once"
+rule above makes unsafe the way this is currently built).
 
 ## Build status
 
@@ -113,7 +149,7 @@ Tracking against the phased build plan in the architecture doc:
 - [x] Phase 0 — Auth service + Postgres schema
 - [x] Phase 0 — React Native shell + navigation
 - [x] Phase 1 — Core messaging (WebSocket fan-out, presence, receipts)
-- [x] Phase 1 — E2E encryption engine (Olm/Megolm, isolated + tested) — wired into auth-service key publishing; not yet wired into the live message flow (no chat UI/WebSocket client in the mobile app yet)
+- [x] Phase 1 — E2E encryption engine (Olm/Megolm) — wired into auth-service key publishing and the live 1:1 message flow (ChatScreen); group-chat encryption still open
 - [ ] Phase 1 — Media service
 - [ ] Phase 1 — Push notifications
 - [ ] Phase 2 — 1:1 calling (WebRTC)

@@ -13,7 +13,8 @@
       "package": "ke.jatelo.relay"
     },
     "extra": {
-      "apiBaseUrl": "http://localhost:4001"
+      "apiBaseUrl": "http://localhost:4001",
+      "messagingBaseUrl": "http://localhost:4002"
     }
   }
 }
