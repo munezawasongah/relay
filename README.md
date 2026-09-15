@@ -189,6 +189,72 @@ uploader-vs-stranger-vs-post-message access transitions, and the exact
 multipart shape the mobile client sends, end to end through a real socket.io
 connection.
 
+### Push notifications
+
+Wires up the other half of the architecture doc's message flow (section 3.2):
+"if offline, persists to PostgreSQL and **triggers a push notification**." The
+device-registration endpoint this depends on (`POST /devices/register`) and
+its `devices.push_token`/`platform` columns already existed from the Phase 0
+scaffold — this phase is what actually calls it and acts on it.
+
+**One simplification worth flagging**, the same way the Olm-vs-libsignal
+choice is flagged above: the doc's tech-stack table lists two separate
+delivery paths, "FCM (Android)" and "APNs (iOS)". `push-service` uses one —
+Firebase Cloud Messaging — for both. A Firebase project configured with an
+iOS app's APNs auth key (in the Firebase console, not this codebase — see
+`.env.example`'s `APNS_*` comments) forwards FCM sends to APNs automatically,
+so one `firebase-admin` integration covers both platforms with the same
+wire-level result. Raw/direct APNs is still the right call for Phase 2's VoIP
+call-wake push specifically (it needs delivery guarantees standard FCM
+doesn't make) — that's untouched here and still open.
+
+`services/messaging-service`'s `message:send` handler now figures out, per
+send, which OTHER members of the conversation are currently connected
+(tracked via each socket's own `data.userId`, not just "is anyone else in the
+room" — the old proxy the `deliveredNow` flag used, which happens to give the
+same answer for a 2-person conversation but wouldn't for a group). Whoever
+isn't connected gets a fire-and-forget call to `push-service`'s
+`POST /push/message`, made *after* the sender's own ack — a slow push call
+should never delay the send confirmation, and a push failure should never
+look like the message itself failed, since by that point it's already
+persisted and fanned out to whoever IS online.
+
+`services/push-service` looks up that recipient's registered devices
+(`devices` table, one row per platform — a phone signed in on both a tablet
+and a handset gets both) and sends through `firebase-admin`. The notification
+body is deliberately generic — `"<sender display name>: Sent you a message"`
+— because the server never has message plaintext to put there; that's the
+whole point of the E2E encryption built earlier. It's called with a shared-
+secret header (`x-internal-secret`, same MVP pattern as `JWT_SECRET`) since
+it's the first service-to-service call in this codebase and has no per-user
+JWT to check — there's no client-facing auth story here because no client
+ever calls it directly. A token FCM reports as dead (uninstalled app, rotated
+token) gets cleared from that device's row so it isn't retried forever; the
+device re-registers a fresh one next time it opens the app.
+
+`apps/mobile/src/notifications/push.ts` (wired into `AuthContext`, same
+best-effort/non-blocking spot as `ensureKeysPublished`) requests notification
+permission and fetches the **raw** platform push token via
+`Notifications.getDevicePushTokenAsync()` — deliberately not Expo's own
+abstracted `ExponentPushToken[...]` from `getExpoPushTokenAsync()`, since the
+doc calls for raw FCM/APNs delivery and that's what `push-service` expects.
+
+**Real, unavoidable limitation, not an oversight**: getting an actual token
+back needs a physical device and a build with a real Firebase project's
+config baked in (`google-services.json` / `GoogleService-Info.plist`) via EAS
+Build — Expo Go can't produce one, and this sandbox has neither a physical
+device nor a Firebase project to test against. What *was* verified live
+before committing, with real running services and no mocks: sending a
+message to a genuinely-offline recipient correctly skips `deliveredAt`,
+correctly triggers exactly one call to `push-service` naming the right
+recipient, `push-service` correctly finds that recipient's registered
+device and logs what it would have sent; sending to a recipient who's
+actually connected correctly sets `deliveredAt` and triggers no push at all;
+and calling `push-service` without the shared secret (or with the wrong one)
+is correctly rejected with 401. What's left unverified is the one piece
+nothing in this sandbox could ever verify: an actual FCM/APNs delivery to a
+real device.
+
 ## Build status
 
 Tracking against the phased build plan in the architecture doc:
@@ -199,7 +265,7 @@ Tracking against the phased build plan in the architecture doc:
 - [x] Phase 1 — Core messaging (WebSocket fan-out, presence, receipts)
 - [x] Phase 1 — E2E encryption engine (Olm/Megolm) — wired into auth-service key publishing and the live 1:1 message flow (ChatScreen); group-chat encryption still open
 - [x] Phase 1 — Media service — upload/thumbnail/access-controlled retrieval, wired into ChatScreen; not E2E encrypted (by design, see above), video thumbnailing/transcoding still open
-- [ ] Phase 1 — Push notifications
+- [x] Phase 1 — Push notifications — offline-message push pipeline (messaging-service -> push-service -> FCM) end to end; actual FCM/APNs delivery to a real device unverifiable without a real Firebase project (see above)
 - [ ] Phase 2 — 1:1 calling (WebRTC)
 - [ ] Phase 2 — Group calls (LiveKit)
 - [ ] Phase 3 — Hardening

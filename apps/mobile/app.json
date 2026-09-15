@@ -15,6 +15,7 @@
     "android": {
       "package": "ke.jatelo.relay"
     },
+    "plugins": ["expo-notifications"],
     "extra": {
       "apiBaseUrl": "http://localhost:4001",
       "messagingBaseUrl": "http://localhost:4002",

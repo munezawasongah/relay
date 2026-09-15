@@ -12,7 +12,15 @@ import type {
   ServerToClientEvents,
 } from "@relay/shared";
 import { verifySocketToken } from "./auth";
-import { getConversationIdsForUser, insertMessage, isConversationMember, markMessageRead } from "./db";
+import {
+  getConversationIdsForUser,
+  getOtherMemberIds,
+  getUserDisplayName,
+  insertMessage,
+  isConversationMember,
+  markMessageRead,
+} from "./db";
+import { notifyOfflinePush } from "./push";
 import { conversationsRouter } from "./routes/conversations";
 import { decrementPresence, incrementPresence } from "./redis";
 
@@ -102,7 +110,16 @@ io.on("connection", (socket: Socket<ClientToServerEvents, ServerToClientEvents, 
       // the schema): at least one other member of the conversation is
       // connected right now to receive it immediately.
       const socketsInRoom = await io.in(room).fetchSockets();
-      const deliveredNow = socketsInRoom.some((s) => s.id !== socket.id);
+      const otherSocketsInRoom = socketsInRoom.filter((s) => s.id !== socket.id);
+      const deliveredNow = otherSocketsInRoom.length > 0;
+      // Which specific *users* are online right now (not just "someone
+      // other than this socket") — a device's own second tab/device
+      // shouldn't count as "the recipient is online" for push purposes,
+      // and this also generalizes correctly once groups exist (today's
+      // deliveredNow flag doesn't distinguish "peer online" from "some
+      // other member online", which happens to be the same thing for a
+      // 2-person conversation).
+      const connectedOtherUserIds = new Set(otherSocketsInRoom.map((s) => s.data.userId));
 
       const message = await insertMessage({
         conversationId: payload.conversationId,
@@ -114,11 +131,33 @@ io.on("connection", (socket: Socket<ClientToServerEvents, ServerToClientEvents, 
 
       socket.to(room).emit("message:new", message);
 
-      // TODO(Phase 1): if !deliveredNow, call push-service so offline
-      // members get a push notification, and add a "fetch missed messages
-      // since last-seen" REST endpoint for when they reconnect.
-
       ack({ ok: true, message, clientMessageId: payload.clientMessageId });
+
+      // Offline-recipient push notifications (architecture doc section 3.2:
+      // "if offline, persists to PostgreSQL and triggers a push
+      // notification"). Fire-and-forget, and deliberately AFTER the ack
+      // above — a slow push-service call or DB lookup here should never
+      // delay the sender's own send confirmation, and a push failure here
+      // should never look like the message failed to send (it already
+      // didn't fail; it's persisted and fanned out to whoever IS online).
+      (async () => {
+        const otherMemberIds = await getOtherMemberIds(payload.conversationId, userId);
+        const offlineRecipientIds = otherMemberIds.filter((id) => !connectedOtherUserIds.has(id));
+        if (offlineRecipientIds.length === 0) return;
+
+        const senderDisplayName = await getUserDisplayName(userId);
+        await Promise.all(
+          offlineRecipientIds.map((recipientId) =>
+            notifyOfflinePush({
+              userId: recipientId,
+              senderDisplayName,
+              conversationId: payload.conversationId,
+            })
+          )
+        );
+      })().catch((err) => {
+        console.error("[messaging-service] offline push notification failed", err);
+      });
     } catch (err) {
       console.error("[messaging-service] message:send failed", err);
       ack({ ok: false, error: "internal_error" });

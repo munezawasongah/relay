@@ -27,6 +27,32 @@ export async function isConversationMember(conversationId: string, userId: strin
   return rows.length > 0;
 }
 
+/** Every other member of the conversation, excluding the sender — used to
+ *  figure out who to push-notify (see index.ts's message:send handler).
+ *  Correct for both direct and group conversations, unlike deriving it
+ *  from a single hardcoded "peerId". */
+export async function getOtherMemberIds(conversationId: string, senderId: string): Promise<string[]> {
+  const { rows } = await pool().query<{ user_id: string }>(
+    "SELECT user_id FROM conversation_members WHERE conversation_id = $1 AND user_id != $2",
+    [conversationId, senderId]
+  );
+  return rows.map((r) => r.user_id);
+}
+
+/** For the push notification's title — the recipient's device shows "X sent
+ *  you a message", and the server has no plaintext to put in the body (see
+ *  push-service's routes/push.ts), so the sender's name is the only useful
+ *  content available. Falls back to a generic label rather than throwing if
+ *  the user somehow doesn't exist (shouldn't happen; not worth failing the
+ *  whole send over). */
+export async function getUserDisplayName(userId: string): Promise<string> {
+  const { rows } = await pool().query<{ display_name: string }>(
+    "SELECT display_name FROM users WHERE id = $1",
+    [userId]
+  );
+  return rows[0]?.display_name || "Someone";
+}
+
 interface MessageRow {
   id: string;
   conversation_id: string;

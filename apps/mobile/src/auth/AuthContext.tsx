@@ -3,6 +3,7 @@ import * as SecureStore from "expo-secure-store";
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { fetchMe } from "../api/auth";
 import { ensureKeysPublished } from "../crypto/bootstrap";
+import { registerForPushNotifications } from "../notifications/push";
 
 const TOKEN_KEY = "relay.session.token";
 
@@ -36,6 +37,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ensureKeysPublished(savedToken).catch((err) => {
             console.warn("[auth] ensureKeysPublished failed on restore", err);
           });
+          registerForPushNotifications(savedToken).catch((err) => {
+            console.warn("[auth] registerForPushNotifications failed on restore", err);
+          });
         }
       } catch {
         // Expired/invalid token, or auth-service unreachable — fall through to signed-out state.
@@ -58,6 +62,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Same best-effort reasoning as the restore path above.
         ensureKeysPublished(newToken).catch((err) => {
           console.warn("[auth] ensureKeysPublished failed on sign-in", err);
+        });
+        registerForPushNotifications(newToken).catch((err) => {
+          console.warn("[auth] registerForPushNotifications failed on sign-in", err);
         });
       },
       async signOut() {
