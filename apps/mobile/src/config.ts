@@ -12,3 +12,6 @@ export const API_BASE_URL: string =
 // Expo Go on a real device.
 export const MESSAGING_BASE_URL: string =
   (Constants.expoConfig?.extra?.messagingBaseUrl as string | undefined) || "http://localhost:4002";
+
+export const MEDIA_BASE_URL: string =
+  (Constants.expoConfig?.extra?.mediaBaseUrl as string | undefined) || "http://localhost:4003";

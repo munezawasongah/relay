@@ -7,14 +7,18 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "ke.jatelo.relay"
+      "bundleIdentifier": "ke.jatelo.relay",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Relay needs access to your photos so you can share them in a chat."
+      }
     },
     "android": {
       "package": "ke.jatelo.relay"
     },
     "extra": {
       "apiBaseUrl": "http://localhost:4001",
-      "messagingBaseUrl": "http://localhost:4002"
+      "messagingBaseUrl": "http://localhost:4002",
+      "mediaBaseUrl": "http://localhost:4003"
     }
   }
 }

@@ -141,6 +141,54 @@ key distribution is real additional work — `useDirectConversation` only handle
 (would mean decrypting speculatively outside of an open chat, which the "only once"
 rule above makes unsafe the way this is currently built).
 
+### Media service
+
+Deliberately **not** end-to-end encrypted — the architecture doc's feature table
+lists "E2E encryption" as covering message *content* specifically, and lists
+"Media messages" as its own separate line with client-side compression, not
+encryption; the schema backs that up too (`media_objects` has no key-material
+column). So `media-service` sees plaintext bytes, which is exactly what lets it
+generate thumbnails server-side. Only the message `text` field (the caption) goes
+through Olm like everything else in the chat.
+
+`db/migrations/0003_media_uploader.sql` adds `media_objects.uploader_id`. Storage
+is Cloudflare R2 (S3-compatible, via `@aws-sdk/client-s3` — `R2_ENDPOINT_OVERRIDE`
+exists purely so local dev/tests can point at a fake S3 server instead of a real
+R2 bucket). `services/media-service/src/routes/media.ts` exposes:
+
+- `POST /media` — multipart upload (25MB cap). Generates a JPEG thumbnail
+  server-side for images (via `sharp`); video thumbnailing/transcoding is
+  deliberately not built yet — it needs ffmpeg, which is real added
+  infrastructure, not a code change. Returns a `MediaInfo` with presigned URLs.
+- `GET /media/:id` — same `MediaInfo` shape, access-controlled: a media object is
+  visible to whoever uploaded it, or to anyone in a conversation where some
+  message's `mediaRef` now points at it. That "uploaded but not yet attached to a
+  message" gap (the moment between finishing the upload and the client sending
+  `message:send` with the resulting id) is exactly why `uploader_id` exists —
+  without it there'd be a window where even the uploader gets a 403 on their own
+  just-uploaded file.
+
+Known limitation: presigned URLs expire after 5 minutes. A chat screen left open
+longer than that won't currently refresh an already-loaded image's URL.
+
+`apps/mobile/src/api/media.ts` (`uploadMedia`, `fetchMediaInfo`) and
+`ChatScreen.tsx`'s new attachment button (`expo-image-picker`) are the client
+side: pick a photo, upload it, then send a normal message whose `text` is empty
+and whose `mediaRef` is the upload's id — `useDirectConversation`'s `sendText`
+already handles a media-only send (an empty string still encrypts fine through
+Olm, it's just zero-length plaintext, and the DB's `ciphertext` column stays
+`NOT NULL` either way). Each message bubble with a `mediaRef` fetches that
+object's URLs independently and renders the thumbnail (falling back to the full
+image if none exists) — a deliberate choice to keep the messaging hook itself
+completely unaware that media-service exists.
+
+Verified against the real running services before committing: real Postgres, a
+local fake-S3 server, and all three services live — upload, thumbnail
+generation, download-URL round-trip to byte-identical bytes, the
+uploader-vs-stranger-vs-post-message access transitions, and the exact
+multipart shape the mobile client sends, end to end through a real socket.io
+connection.
+
 ## Build status
 
 Tracking against the phased build plan in the architecture doc:
@@ -150,7 +198,7 @@ Tracking against the phased build plan in the architecture doc:
 - [x] Phase 0 — React Native shell + navigation
 - [x] Phase 1 — Core messaging (WebSocket fan-out, presence, receipts)
 - [x] Phase 1 — E2E encryption engine (Olm/Megolm) — wired into auth-service key publishing and the live 1:1 message flow (ChatScreen); group-chat encryption still open
-- [ ] Phase 1 — Media service
+- [x] Phase 1 — Media service — upload/thumbnail/access-controlled retrieval, wired into ChatScreen; not E2E encrypted (by design, see above), video thumbnailing/transcoding still open
 - [ ] Phase 1 — Push notifications
 - [ ] Phase 2 — 1:1 calling (WebRTC)
 - [ ] Phase 2 — Group calls (LiveKit)

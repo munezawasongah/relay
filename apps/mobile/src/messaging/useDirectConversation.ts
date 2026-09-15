@@ -14,6 +14,10 @@ export interface ChatMessage {
   text: string;
   sentAt: string;
   readAt?: string;
+  /** A media-service object id (see api/media.ts) — media itself is NOT
+   *  end-to-end encrypted (see @relay/shared's MediaInfo doc comment), only
+   *  the caption in `text` is. */
+  mediaRef?: string;
   /** Optimistically added, not yet acked by the server. */
   pending?: boolean;
   /** Either the send failed, or (history only) this message's plaintext
@@ -50,8 +54,12 @@ async function encryptForPeer(
   }
 }
 
-function toChatMessage(m: { id: string; senderId: string; sentAt: string; readAt?: string }, text: string, extra?: Partial<ChatMessage>): ChatMessage {
-  return { id: m.id, senderId: m.senderId, sentAt: m.sentAt, readAt: m.readAt, text, ...extra };
+function toChatMessage(
+  m: { id: string; senderId: string; sentAt: string; readAt?: string; mediaRef?: string },
+  text: string,
+  extra?: Partial<ChatMessage>
+): ChatMessage {
+  return { id: m.id, senderId: m.senderId, sentAt: m.sentAt, readAt: m.readAt, mediaRef: m.mediaRef, text, ...extra };
 }
 
 /** Backs a single 1:1 chat screen: loads history (decrypting whatever
@@ -168,22 +176,28 @@ export function useDirectConversation(conversationId: string, peerId: string) {
   }, [socket, conversationId, peerId]);
 
   const sendText = useCallback(
-    async (text: string) => {
+    async (text: string, mediaRef?: string) => {
       if (!token || !user || !socket) return;
       const trimmed = text.trim();
-      if (!trimmed) return;
+      if (!trimmed && !mediaRef) return; // nothing to send
 
       const localId = randomLocalId();
       const nowIso = new Date().toISOString();
-      setMessages((prev) => [...prev, { id: localId, senderId: user.id, text: trimmed, sentAt: nowIso, pending: true }]);
+      setMessages((prev) => [
+        ...prev,
+        { id: localId, senderId: user.id, text: trimmed, mediaRef, sentAt: nowIso, pending: true },
+      ]);
 
       try {
+        // A media-only message still needs *some* ciphertext (the DB column
+        // is NOT NULL) — encrypting an empty string is fine for Olm, it's
+        // just zero-length plaintext.
         const encrypted = await encryptForPeer(peerId, trimmed, token);
         const ciphertext = JSON.stringify(encrypted);
 
         socket.emit(
           "message:send",
-          { conversationId, ciphertext, clientMessageId: localId },
+          { conversationId, ciphertext, clientMessageId: localId, mediaRef },
           async (ack: MessageSendAck) => {
             if (!ack.ok || !ack.message) {
               setMessages((prev) => prev.map((m) => (m.id === localId ? { ...m, pending: false, unavailable: true } : m)));

@@ -165,3 +165,19 @@ export interface CreateDirectConversationPayload {
   peerId: string;
 }
 
+// --- Media (Media Service) ---
+// Deliberately NOT end-to-end encrypted, unlike message content (see the
+// architecture doc's feature table: E2E encryption is scoped to "1:1 and
+// group message content", separately from "Media messages: ... with
+// client-side compression before upload") — media-service can read image
+// bytes because it has to, to generate thumbnails. See README for the
+// implications and what a genuinely encrypted-media follow-up would need.
+
+export interface MediaInfo {
+  id: string;
+  mimeType: string;
+  sizeBytes: number;
+  downloadUrl: string;
+  thumbnailUrl?: string;
+}
+
