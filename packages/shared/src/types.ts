@@ -181,3 +181,97 @@ export interface MediaInfo {
   thumbnailUrl?: string;
 }
 
+// --- Calls (Call Signaling Service) ---
+// Phase 2, section 3.3: 1:1 voice/video only, peer-to-peer WebRTC with TURN
+// fallback. Group calls (LiveKit SFU, 4-8 participants) are a separate,
+// later slice — call:invite below rejects a non-direct conversationId
+// rather than silently doing the wrong thing.
+//
+// Deliberately plain shapes (not the DOM lib's RTCSessionDescription /
+// RTCIceCandidate types, and not react-native-webrtc's either) so this
+// package stays usable from plain Node as well as RN — both of those
+// classes' own .toJSON() output already matches these shapes exactly, so
+// no translation is needed at the call site.
+
+export interface SessionDescriptionLike {
+  type: "offer" | "answer";
+  sdp: string;
+}
+
+export interface IceCandidateLike {
+  candidate: string;
+  sdpMid: string | null;
+  sdpMLineIndex: number | null;
+}
+
+/** What a client needs to construct an RTCPeerConnection's ICE
+ *  configuration. TURN credentials here are static/shared (matching the
+ *  docker-compose dev coturn setup) — see the README's "Calling" section
+ *  for why short-lived per-session HMAC credentials are a documented
+ *  production follow-up, not implemented here. */
+export interface IceServerConfig {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
+export type CallEndReason = "hangup" | "missed" | "declined";
+
+export interface CallInvitePayload {
+  conversationId: string;
+  type: CallType;
+}
+
+export interface CallInviteAck {
+  ok: boolean;
+  call?: Call;
+  iceServers?: IceServerConfig[];
+  error?: "not_a_member" | "group_calls_not_supported" | "callee_unreachable" | "call_already_in_progress" | "internal_error";
+}
+
+export interface CallActionPayload {
+  callId: string;
+}
+
+export interface CallActionAck {
+  ok: boolean;
+  error?: "not_found" | "not_a_participant" | "invalid_state" | "internal_error";
+}
+
+/** Sent to the callee only — a Call plus the two things they need that
+ *  aren't in the DB row: who's calling (by name, not just id) and the ICE
+ *  config to answer with. */
+export interface IncomingCallPayload extends Call {
+  callerDisplayName: string;
+  iceServers: IceServerConfig[];
+}
+
+export interface CallAcceptedPayload {
+  callId: string;
+  iceServers: IceServerConfig[];
+}
+
+export interface CallEndedPayload {
+  callId: string;
+  reason: CallEndReason;
+}
+
+export interface ClientToCallServerEvents {
+  "call:invite": (payload: CallInvitePayload, ack: (result: CallInviteAck) => void) => void;
+  "call:accept": (payload: CallActionPayload, ack: (result: CallActionAck) => void) => void;
+  "call:decline": (payload: CallActionPayload, ack: (result: CallActionAck) => void) => void;
+  "call:hangup": (payload: CallActionPayload, ack: (result: CallActionAck) => void) => void;
+  "call:offer": (payload: { callId: string; description: SessionDescriptionLike }) => void;
+  "call:answer": (payload: { callId: string; description: SessionDescriptionLike }) => void;
+  "call:ice-candidate": (payload: { callId: string; candidate: IceCandidateLike }) => void;
+}
+
+export interface ServerToCallClientEvents {
+  "call:incoming": (payload: IncomingCallPayload) => void;
+  "call:accepted": (payload: CallAcceptedPayload) => void;
+  "call:ended": (payload: CallEndedPayload) => void;
+  "call:offer": (payload: { callId: string; description: SessionDescriptionLike }) => void;
+  "call:answer": (payload: { callId: string; description: SessionDescriptionLike }) => void;
+  "call:ice-candidate": (payload: { callId: string; candidate: IceCandidateLike }) => void;
+}
+

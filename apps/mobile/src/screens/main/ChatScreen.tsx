@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { fetchMediaInfo, uploadMedia } from "../../api/media";
 import { useAuth } from "../../auth/AuthContext";
+import { useCall } from "../../calling/CallContext";
 import { useMessaging } from "../../messaging/MessagingContext";
 import { type ChatMessage, useDirectConversation } from "../../messaging/useDirectConversation";
 import type { MainStackParamList } from "../../navigation/MainNavigator";
@@ -27,6 +28,7 @@ export default function ChatScreen({ route, navigation }: Props) {
   const { conversationId, peerId, name } = route.params;
   const { user, token } = useAuth();
   const { isConnected } = useMessaging();
+  const { startCall, phase: callPhase } = useCall();
   const { messages, isLoadingHistory, peerTyping, sendText, notifyTyping } = useDirectConversation(
     conversationId,
     peerId
@@ -34,8 +36,42 @@ export default function ChatScreen({ route, navigation }: Props) {
   const [draft, setDraft] = useState("");
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
 
+  async function handleStartCall(type: "audio" | "video") {
+    if (callPhase !== "idle") {
+      Alert.alert("Already on a call", "Finish your current call before starting a new one.");
+      return;
+    }
+    const error = await startCall({ conversationId, peerId, peerDisplayName: name, type });
+    if (error === "callee_unreachable") {
+      Alert.alert(
+        `Can't reach ${name}`,
+        `${name} isn't online right now — calling needs both people to have the app open (no call-ringing notification yet).`
+      );
+    } else if (error === "media_permission_denied") {
+      Alert.alert("Permission needed", `Relay needs microphone${type === "video" ? "/camera" : ""} access to make a call.`);
+    } else if (error) {
+      Alert.alert("Couldn't start call", "Please try again.");
+    }
+  }
+
   useLayoutEffect(() => {
-    navigation.setOptions({ title: name });
+    navigation.setOptions({
+      title: name,
+      headerRight: () => (
+        <View style={styles.headerButtons}>
+          <Pressable style={styles.headerButton} onPress={() => handleStartCall("audio")}>
+            <Text style={styles.headerButtonText}>📞</Text>
+          </Pressable>
+          <Pressable style={styles.headerButton} onPress={() => handleStartCall("video")}>
+            <Text style={styles.headerButtonText}>🎥</Text>
+          </Pressable>
+        </View>
+      ),
+    });
+    // handleStartCall is intentionally omitted: it's recreated every render
+    // (it closes over callPhase) but doesn't need to be a stable identity
+    // for setOptions's headerRight to keep working correctly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigation, name]);
 
   function handleChangeDraft(text: string) {
@@ -236,6 +272,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   attachButtonText: { fontSize: 20, color: "#0a7ea4", lineHeight: 22 },
+  headerButtons: { flexDirection: "row", gap: 14, marginRight: 4 },
+  headerButton: { padding: 4 },
+  headerButtonText: { fontSize: 20 },
   input: {
     flex: 1,
     borderWidth: 1,

@@ -9,17 +9,29 @@
       "supportsTablet": true,
       "bundleIdentifier": "ke.jatelo.relay",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Relay needs access to your photos so you can share them in a chat."
+        "NSPhotoLibraryUsageDescription": "Relay needs access to your photos so you can share them in a chat.",
+        "NSCameraUsageDescription": "Relay needs access to your camera to make video calls.",
+        "NSMicrophoneUsageDescription": "Relay needs access to your microphone to make calls."
       }
     },
     "android": {
       "package": "ke.jatelo.relay"
     },
-    "plugins": ["expo-notifications"],
+    "plugins": [
+      "expo-notifications",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Relay needs access to your camera to make video calls.",
+          "microphonePermission": "Relay needs access to your microphone to make calls."
+        }
+      ]
+    ],
     "extra": {
       "apiBaseUrl": "http://localhost:4001",
       "messagingBaseUrl": "http://localhost:4002",
-      "mediaBaseUrl": "http://localhost:4003"
+      "mediaBaseUrl": "http://localhost:4003",
+      "callSignalingBaseUrl": "http://localhost:4004"
     }
   }
 }

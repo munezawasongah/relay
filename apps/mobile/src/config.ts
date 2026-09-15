@@ -15,3 +15,6 @@ export const MESSAGING_BASE_URL: string =
 
 export const MEDIA_BASE_URL: string =
   (Constants.expoConfig?.extra?.mediaBaseUrl as string | undefined) || "http://localhost:4003";
+
+export const CALL_SIGNALING_BASE_URL: string =
+  (Constants.expoConfig?.extra?.callSignalingBaseUrl as string | undefined) || "http://localhost:4004";

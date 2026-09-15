@@ -255,6 +255,94 @@ is correctly rejected with 401. What's left unverified is the one piece
 nothing in this sandbox could ever verify: an actual FCM/APNs delivery to a
 real device.
 
+## Calling (Phase 2, 1:1 only)
+
+Starts Phase 2 with exactly what the doc scopes first: 1:1 voice/video via
+peer-to-peer WebRTC with TURN fallback (section 3.3). Group calls (LiveKit
+SFU, 4-8 participants) are their own separate slice of work — `livekit-server-sdk`
+has sat unused in `call-signaling-service`'s dependencies since the Phase 0
+scaffold, and stays unused until that slice happens.
+
+**Also deliberately not built yet**: "Call notifications" — the doc's own
+Phase 2 feature table lists this as its own bullet, distinct from "1:1
+voice/video calls", and for good reason: it needs VoIP push (`PushKit` on
+iOS specifically, not a normal notification) to wake an app that's fully
+closed, which is a real native-module undertaking beyond what Expo's
+managed workflow gives you for free — unlike the standard push notifications
+built in the previous phase. Practical effect right now: calling only works
+between two people who both already have the app open (connected to
+`call-signaling-service`'s socket) — `call:invite` on a callee with no
+active connection is rejected outright with `callee_unreachable` rather than
+ringing into a void nothing would ever wake up. `ChatScreen`'s call buttons
+surface that as a plain "isn't online right now" alert.
+
+`services/call-signaling-service` is socket.io-based, same shape as
+`messaging-service`: JWT-in-handshake auth, a room per signed-in user. REST
+isn't used here at all — every part of a call (invite, accept, decline,
+hangup, SDP offer/answer, ICE candidates) goes over the socket, mirroring
+how `messaging-service`'s live path works, since call setup is exactly as
+live/bidirectional as messaging is. `calls` (schema, Phase 0) already had
+everywhere this needed to land — `status` transitions are guarded
+(`transitionCall`'s `expectedCurrentStatus` check) the same way
+`markMessageRead`'s `read_at` guard prevents acting twice on one row.
+
+Three status outcomes worth being precise about, since the schema only
+gives you `ended`/`missed`/`declined` to work with: **declined** is the
+callee explicitly rejecting a still-ringing call; **missed** is a call that
+ends while still `ringing` for any other reason (caller cancels before
+answer, or — see below — a participant's connection just drops); **ended**
+is a call that had actually gone `active` and then finished normally. A
+participant's app crashing or losing connection mid-call is handled too:
+`call-signaling-service`'s `disconnect` handler checks whether that was the
+user's last connected socket, and if they had an in-progress call, ends it
+and tells the other side — otherwise the other participant's screen would
+just sit there forever with no signal anything went wrong.
+
+TURN credentials are **static** (`relay:relay`, matching the docker-compose
+dev coturn container) via `iceServers.ts`, not the per-session HMAC
+credentials `infra/coturn/README.md`'s "Production needs" section calls
+for. Same category of documented MVP simplification as this project's other
+"good enough for now" calls, but a real one — a leaked static TURN password
+is a standing relay-abuse risk in a way a credential that expires in an
+hour isn't.
+
+Mobile (`apps/mobile/src/calling/`): `CallContext` owns both the
+call-signaling socket and the WebRTC `RTCPeerConnection` for the life of a
+signed-in session, sitting above the navigator in `App.tsx` — an incoming
+call can land while the user's on any screen, not just a chat, so it can't
+live inside a single screen's component tree. It pushes `CallScreen`
+through a navigation ref (`navigation/navigationRef.ts`, the standard React
+Navigation pattern for navigating from outside a screen) rather than a
+normal `navigation` prop. The signaling choreography (who creates the offer
+and when, and why both the offer and ICE candidates need to be buffered
+against arriving before there's a peer connection to hand them to yet) is
+laid out in `CallContext`'s own file comment — worth reading before
+touching it, same as `messageCache.ts`'s comment for the messaging side.
+
+**Real, unavoidable limitation, not an oversight, same category as push
+notifications' real-device requirement**: `react-native-webrtc` needs
+native code Expo Go can't provide — a real build (EAS Build or
+`expo prebuild`) is required, which this sandbox can't produce or run, and
+there's no physical device or second peer to actually place a call between
+here either. What *was* verified live before committing, against the real
+running stack (Postgres + all four other services, no mocks, using
+`socket.io-client` to script two real signed-up users through the whole
+protocol): a callee with no active connection is correctly turned away with
+`callee_unreachable`; a full call — invite, `call:incoming` delivered with
+the caller's real display name and ICE servers, accept, SDP offer relayed,
+SDP answer relayed, an ICE candidate relayed, and a clean hangup — round-
+trips correctly end to end with the right `call:ended` reason; a decline
+produces `reason: "declined"` and the initiator is correctly blocked from
+declining their own call; a caller cancelling before answer produces
+`reason: "missed"`; inviting to a real group conversation (inserted
+directly for the test, since there's no group-chat UI to create one through)
+is correctly rejected as unsupported; inviting to a conversation the caller
+isn't a member of is correctly rejected; and a participant's socket
+disconnecting abruptly mid-call (simulating a crash) correctly ends the call
+and notifies the other side. What's left unverified is the same shape of gap
+as calling's mobile build in general: actual audio/video flowing between two
+real devices.
+
 ## Build status
 
 Tracking against the phased build plan in the architecture doc:
@@ -266,7 +354,7 @@ Tracking against the phased build plan in the architecture doc:
 - [x] Phase 1 — E2E encryption engine (Olm/Megolm) — wired into auth-service key publishing and the live 1:1 message flow (ChatScreen); group-chat encryption still open
 - [x] Phase 1 — Media service — upload/thumbnail/access-controlled retrieval, wired into ChatScreen; not E2E encrypted (by design, see above), video thumbnailing/transcoding still open
 - [x] Phase 1 — Push notifications — offline-message push pipeline (messaging-service -> push-service -> FCM) end to end; actual FCM/APNs delivery to a real device unverifiable without a real Firebase project (see above)
-- [ ] Phase 2 — 1:1 calling (WebRTC)
+- [x] Phase 2 — 1:1 calling (WebRTC) — signaling + peer-to-peer media fully built and wired into ChatScreen; VoIP call-notification push and an actual on-device test both still open (see above)
 - [ ] Phase 2 — Group calls (LiveKit)
 - [ ] Phase 3 — Hardening
 - [ ] Phase 4 — Private beta
